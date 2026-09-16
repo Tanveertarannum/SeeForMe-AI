@@ -1,36 +1,45 @@
-import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter
+import warnings
+warnings.filterwarnings("ignore")
+
+import easyocr
+import cv2
 
 
-# Tell Python where Tesseract is installed
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Initialize EasyOCR
+reader = easyocr.Reader(
+    ['en'],
+    gpu=False,
+    verbose=False
 )
 
 
 def read_text(image_path):
 
-    # Open image
-    image = Image.open(image_path)
+    # Read image
+    image = cv2.imread(image_path)
 
-    # Convert image to grayscale
-    image = image.convert("L")
+    if image is None:
+        return {
+            "text": "",
+            "message": "Unable to read image."
+        }
 
-    # Improve contrast
-    enhancer = ImageEnhance.Contrast(image)
-    image = enhancer.enhance(2.0)
+    # Run EasyOCR
+    results = reader.readtext(image)
 
-    # Sharpen image
-    image = image.filter(ImageFilter.SHARPEN)
+    detected_text = []
 
-    # Extract text using Tesseract
-    text = pytesseract.image_to_string(
-        image,
-        lang="eng"
-    )
+    for result in results:
 
-    # Clean extracted text
-    text = text.strip()
+        text = result[1]
+        confidence = result[2]
+
+        # Confidence threshold
+        if confidence >= 0.40:
+            detected_text.append(text)
+
+    # Combine detected text
+    text = "\n".join(detected_text)
 
     if text:
         message = "Text detected successfully."
