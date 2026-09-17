@@ -1,62 +1,92 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/detection_result.dart';
-import '../services/detection_service.dart';
 import '../theme/app_theme.dart';
 
 class LiveDetectionScreen extends StatefulWidget {
   const LiveDetectionScreen({super.key});
 
   @override
-  State<LiveDetectionScreen> createState() =>
-      _LiveDetectionScreenState();
+  State<LiveDetectionScreen> createState() => _LiveDetectionScreenState();
 }
 
-class _LiveDetectionScreenState
-    extends State<LiveDetectionScreen> {
-  final DetectionService _detectionService =
-      DetectionService();
+class _LiveDetectionScreenState extends State<LiveDetectionScreen> {
+  // FastAPI backend
+  static const String backendUrl = 'http://127.0.0.1:8000';
 
   List<DetectionResult> detections = [];
 
   bool isScanning = false;
   bool isLoading = false;
 
+  String? analysisMessage;
+  String? recommendedDirection;
+
   Future<void> startDetection() async {
     setState(() {
       isScanning = true;
       isLoading = true;
+      detections = [];
+      analysisMessage = null;
+      recommendedDirection = null;
     });
 
     try {
-      final results =
-          await _detectionService.getDummyDetections();
+      // Temporary test request.
+      // Real camera image will be connected next.
+      final response = await http.get(
+        Uri.parse('$backendUrl/vision/test'),
+      );
 
-      if (!mounted) return;
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
 
-      setState(() {
-        detections = results;
-        isLoading = false;
-      });
+        if (!mounted) return;
+
+        setState(() {
+          isLoading = false;
+          analysisMessage = data['message'] ?? 'Vision API is working.';
+        });
+
+        // Browser voice
+        await speakText(analysisMessage!);
+      } else {
+        throw Exception('Vision API returned ${response.statusCode}');
+      }
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
         isLoading = false;
+        isScanning = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to process the camera frame.'),
+        SnackBar(
+          content: Text(
+            'Unable to connect to backend.\n$e',
+          ),
         ),
       );
     }
   }
 
+  Future<void> speakText(String text) async {
+    // Browser speech will be connected here.
+    // For now this confirms that the backend response reached Flutter.
+    debugPrint('VOICE: $text');
+  }
+
   void stopDetection() {
     setState(() {
       isScanning = false;
+      isLoading = false;
       detections = [];
+      analysisMessage = null;
+      recommendedDirection = null;
     });
   }
 
@@ -103,8 +133,7 @@ class _LiveDetectionScreenState
               const SizedBox(height: 20),
 
               Row(
-                mainAxisAlignment:
-                    MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
                     'Detected Objects',
@@ -113,8 +142,7 @@ class _LiveDetectionScreenState
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (isScanning)
-                    _buildScanningIndicator(),
+                  if (isScanning) _buildScanningIndicator(),
                 ],
               ),
 
@@ -122,14 +150,15 @@ class _LiveDetectionScreenState
 
               if (isLoading)
                 _buildLoadingCard()
+              else if (analysisMessage != null)
+                _buildAnalysisCard()
               else if (!isScanning)
                 _buildEmptyState()
               else if (detections.isEmpty)
                 _buildNoDetection()
               else
                 ...detections.map(
-                  (detection) =>
-                      _buildDetectionCard(detection),
+                  (detection) => _buildDetectionCard(detection),
                 ),
 
               const SizedBox(height: 24),
@@ -138,9 +167,8 @@ class _LiveDetectionScreenState
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton.icon(
-                  onPressed: isScanning
-                      ? stopDetection
-                      : startDetection,
+                  onPressed:
+                      isScanning ? stopDetection : startDetection,
                   icon: Icon(
                     isScanning
                         ? Icons.stop_rounded
@@ -152,14 +180,12 @@ class _LiveDetectionScreenState
                         : 'Start Detection',
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isScanning
-                        ? AppTheme.danger
-                        : AppTheme.teal,
+                    backgroundColor:
+                        isScanning ? AppTheme.danger : AppTheme.teal,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(18),
                     ),
                   ),
                 ),
@@ -215,15 +241,13 @@ class _LiveDetectionScreenState
               top: 16,
               left: 16,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(
+                padding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.35),
-                  borderRadius:
-                      BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
                   children: [
@@ -240,7 +264,7 @@ class _LiveDetectionScreenState
                     const SizedBox(width: 7),
                     Text(
                       isScanning
-                          ? 'SCANNING'
+                          ? 'AI CONNECTED'
                           : 'CAMERA READY',
                       style: const TextStyle(
                         color: Colors.white,
@@ -280,12 +304,64 @@ class _LiveDetectionScreenState
     );
   }
 
-  Widget _buildDetectionCard(
-      DetectionResult detection) {
-    final distanceText =
-        detection.distance != null
-            ? '${detection.distance!.toStringAsFixed(1)} m away'
-            : 'Distance unavailable';
+  Widget _buildAnalysisCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.paper,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+            color: Colors.black.withOpacity(0.06),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.check_circle_outline_rounded,
+            size: 48,
+            color: AppTheme.teal,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Backend Connected',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            analysisMessage ?? '',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.muted,
+              fontSize: 14,
+            ),
+          ),
+          if (recommendedDirection != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Direction: $recommendedDirection',
+              style: TextStyle(
+                color: AppTheme.teal,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetectionCard(DetectionResult detection) {
+    final distanceText = detection.distance != null
+        ? '${detection.distance!.toStringAsFixed(1)} m away'
+        : 'Distance unavailable';
 
     final confidence =
         '${(detection.confidence * 100).round()}% confidence';
@@ -312,21 +388,17 @@ class _LiveDetectionScreenState
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: AppTheme.mist,
-              borderRadius:
-                  BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Text(
               getObjectIcon(detection.object),
               style: const TextStyle(fontSize: 25),
             ),
           ),
-
           const SizedBox(width: 14),
-
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   detection.object,
@@ -335,9 +407,7 @@ class _LiveDetectionScreenState
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-
                 const SizedBox(height: 5),
-
                 Text(
                   '${detection.position} • $distanceText',
                   style: TextStyle(
@@ -345,9 +415,7 @@ class _LiveDetectionScreenState
                     fontSize: 13,
                   ),
                 ),
-
                 const SizedBox(height: 3),
-
                 Text(
                   confidence,
                   style: TextStyle(
@@ -359,7 +427,6 @@ class _LiveDetectionScreenState
               ],
             ),
           ),
-
           Icon(
             Icons.chevron_right_rounded,
             color: AppTheme.muted,
@@ -382,7 +449,7 @@ class _LiveDetectionScreenState
           const CircularProgressIndicator(),
           const SizedBox(height: 15),
           Text(
-            'AI is analyzing the scene...',
+            'Connecting to AI backend...',
             style: TextStyle(
               color: AppTheme.text,
               fontWeight: FontWeight.w600,
@@ -397,7 +464,7 @@ class _LiveDetectionScreenState
     return _infoCard(
       Icons.camera_alt_outlined,
       'Ready to scan',
-      'Start detection to understand what is around you.',
+      'Start detection to connect with the SeeForMe AI backend.',
     );
   }
 
